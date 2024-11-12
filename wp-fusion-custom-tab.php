@@ -37,8 +37,7 @@ function wp_fusion_custom_tab_init() {
     }
 
     // Include required files
-    require_once WPF_CT_DIR_PATH . 'includes/class-custom-tab.php';
-    require_once WPF_CT_DIR_PATH . 'class-post-fields.php';
+    require_once WPF_CT_DIR_PATH . 'includes/integrations/class-cpt.php';
 
     // Initialize the plugin
     wp_fusion_custom_tab();
