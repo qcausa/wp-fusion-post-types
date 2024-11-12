@@ -70,7 +70,8 @@ class WPF_Custom_Tab {
         // Post type sync button AJAX method
 		add_action('wp_ajax_wpf_sync_post_type_fields', array($this, 'ajax_sync_post_type_fields'));
 
-        add_filter( "wpf_post_meta_fields", array( $this, "prepare_post_meta_fields" ) );
+        add_filter( 'wpf_post_meta_fields', array( $this, 'prepare_post_meta_fields' ), 10, 2 );
+
 
         // Add the post types configuration filter
         add_filter( 'wpf_configure_setting_custom_post_types', array( $this, 'configure_setting_custom_post_types' ), 10, 2 );
@@ -80,6 +81,10 @@ class WPF_Custom_Tab {
             add_filter( 'wpf_set_setting_crm_' . $post_type . '_fields', function( $value ) use ( $post_type ) {
                 return $this->save_crm_post_type_fields( $value, $post_type );
             }, 5, 1 );
+
+            add_filter( 'wpf_get_setting_crm_' . $post_type . '_fields', function( $value ) use ( $post_type ) {
+                return $this->handle_get_crm_post_fields( $value, $post_type );
+            }, 5, 1 );
         
             add_action( 'show_field_' . $post_type . '_fields_begin', function( $args = null, $options = null ) use ( $post_type ) {
                 WPF_Post_Fields::show_field_post_fields_begin( $args, $options, $post_type );
@@ -88,13 +93,15 @@ class WPF_Custom_Tab {
             add_action( 'show_field_' . $post_type . '_fields', function( $args = null, $options = null ) use ( $post_type ) {
                 WPF_Post_Fields::show_field_post_fields( $args, $options, $post_type );
             }, 10, 2 );
+            
 
             // Load the field mapping into memory.
             $this->{$post_type . '_fields'} = wpf_get_option( $post_type . '_fields', array() );
         }
         
 
-        add_filter( 'wpf_get_setting_crm_post_fields', array( $this, 'handle_get_crm_post_fields' ), 15 );
+        //add_filter( 'wpf_get_setting_crm_post_fields', array( $this, 'handle_get_crm_post_fields' ), 15 );
+        //add_filter( 'wpf_get_setting_crm_tribe_events_fields', array( $this, 'handle_get_crm_post_fields' ), 15 );
 
         // Add filter for resetting options
         add_action( 'wpf_resetting_options', array( $this, 'reset_plugin_options' ) );
@@ -102,11 +109,13 @@ class WPF_Custom_Tab {
 
         // Add validation
         add_filter( 'validate_field_post_fields', array( $this, 'validate_field_post_fields' ), 10, 3 );
+        add_filter( 'validate_field_tribe_events_fields', array( $this, 'validate_field_tribe_events_fields' ), 10, 3 );
         add_filter( 'validate_field_custom_reset', array( $this, 'validate_field_custom_reset' ), 10, 2 );
 
 
         // Post type actions
 		add_action( 'post_updated', array( $this, 'post_updated' ), 10, 3 );
+        add_action( 'tribe_events_updated', array( $this, 'tribe_events_updated' ), 10, 3 );
 
         // hook into map_meta_fields, which is usually just for user meta mapping, and override the $update_data for custom post types
         add_filter( 'wpf_map_meta_fields', array( $this, 'wpf_cpt_map_meta_fields' ), 10, 2 );
@@ -197,13 +206,16 @@ class WPF_Custom_Tab {
             foreach ( $this->selected_post_types as $post_type ) {
                 $post_type_object = get_post_type_object( $post_type );
                 
-                if ( ! $post_type_object ) {
-                    continue;
-                }
+                // if ( ! $post_type_object ) {
+                //BugFu::log("post_type_object not found for " . $post_type);
+                //     continue;
+                // }
+
+                $label = ucwords( str_replace( '_', ' ', $post_type ) );
 
                 // Define the custom type for the post type with a sync button
                 $settings["post_type_sync_{$post_type}"] = array(
-                    'title'       => sprintf( __( '%s Link', 'wp-fusion-lite' ), $post_type_object->labels->singular_name ),
+                    'title'       => sprintf( __( '%s Link', 'wp-fusion-lite' ), $label ),
                     'type'    => 'sync_button',
                     'section' => 'custom2',
                     'choices'     => $available_lists,
@@ -212,7 +224,7 @@ class WPF_Custom_Tab {
                         'data-post_type' => $post_type,
                         'data-nonce'     => wp_create_nonce('wpf_sync_post_type_fields'),
                     ),
-                    'post_fields' => array( 'post_type_sync_' . $post_type_object->labels->singular_name ),
+                    'post_fields' => array( 'post_type_sync_' . $post_type ),
                 );
 
                 // Check if this post type has a board connected
@@ -222,8 +234,8 @@ class WPF_Custom_Tab {
                 if ( ! empty( $setting_value ) ) {
                     // Add post fields table to the post type's custom tab
                     $settings["{$post_type}_fields"] = array(
-                        'title'   => sprintf( __( '%s Fields', 'wp-fusion-lite' ), $post_type_object->labels->singular_name ),
-                        'desc'    => sprintf( __( 'Configure field mapping for %s', 'wp-fusion-lite' ), $post_type_object->labels->name ),
+                        'title'   => sprintf( __( '%s Fields', 'wp-fusion-lite' ), $label ),
+                        'desc'    => sprintf( __( 'Configure field mapping for %s', 'wp-fusion-lite' ), $label ),
                         'std'     => array(),
                         'type'    => "{$post_type}-fields",
                         'section' => "{$post_type}-fields",
@@ -289,7 +301,7 @@ class WPF_Custom_Tab {
      * @since 1.0
      * @return array
      */
-    public function prepare_post_meta_fields( $meta_fields ) {
+    public function prepare_post_meta_fields( $meta_fields, $post_type ) {
         // Load the reference of standard WP field names and types.
         include __DIR__ . '/wordpress-post-fields.php';
     
@@ -302,7 +314,9 @@ class WPF_Custom_Tab {
         }
     
         // Get any additional wp_usermeta data.
-        $all_fields = $this->get_post_meta_keys('post');
+        $all_fields = $this->get_post_meta_keys($post_type);
+        //BugFu::log($all_fields);
+       
     
         // Some fields we can exclude via partials.
         $exclude_fields_partials = array(
@@ -325,7 +339,10 @@ class WPF_Custom_Tab {
         // Sets field types and labels for all built in fields.
         foreach ( $all_fields as $key ) {
             // Skip hidden fields.
-            if ( substr( $key, 0, 1 ) === '_' || substr( $key, 0, 5 ) === 'hide_' || substr( $key, 0, 3 ) === 'wp_' ) {
+            // if ( substr( $key, 0, 1 ) === '_' || substr( $key, 0, 5 ) === 'hide_' || substr( $key, 0, 3 ) === 'wp_' ) {
+            //     continue;
+            // }
+            if ( substr( $key, 0, 5 ) === 'hide_' || substr( $key, 0, 3 ) === 'wp_' ) {
                 continue;
             }
     
@@ -342,6 +359,7 @@ class WPF_Custom_Tab {
     }
 
     function get_post_meta_keys( $post_type ) {
+        //BugFu::log("get_post_meta_keys init");
         global $wpdb;
     
         // Get the standard fields dynamically from the wp_posts table
@@ -502,7 +520,7 @@ class WPF_Custom_Tab {
 
     public function sync_post_type_fields($post_type) {
 
-        BugFu::log($post_type);
+        //BugFu::log($post_type);
 
 		// Load built in fields first
 		// require dirname( __FILE__ ) . '/monday-fields.php';
@@ -549,7 +567,7 @@ class WPF_Custom_Tab {
                 'body'    => $query,
             )
         );
-        BugFu::log($response);  
+       
 
         // Handle the response
         if (is_wp_error($response)) {
@@ -578,7 +596,7 @@ class WPF_Custom_Tab {
         foreach ($body['data']['boards'][0]['columns'] as $column) {
             $custom_fields[$column['id']] = $column['title'];
         }
-		BugFu::log($custom_fields);
+		//BugFu::log($custom_fields);
 
 		$post_fields = array(
 			'Standard Fields' => $built_in_fields,
@@ -599,7 +617,7 @@ class WPF_Custom_Tab {
      * @return mixed
      */
     public function save_available_workspaces( $value ) {
-		BugFu::log("save_available_workspaces init");
+		//BugFu::log("save_available_workspaces init");
         // // Save to custom option
         update_option( 'wpf_available_workspaces', $value, false );
 
@@ -608,7 +626,7 @@ class WPF_Custom_Tab {
     }
 
     public function save_crm_post_type_fields( $value, $post_type ) {
-        BugFu::log( "Saving fields for post type: $post_type" );
+        //BugFu::log( "Saving fields for post type: $post_type" );
     
         // Save to a custom option based on the post type
         update_option( 'wpf_crm_' . $post_type . '_fields', $value, false );
@@ -625,14 +643,14 @@ class WPF_Custom_Tab {
 	 * @param  array $fields The fields.
 	 * @return array  Contact fields
 	 */
-	public function handle_get_crm_post_fields( $fields ) {
+	public function handle_get_crm_post_fields( $fields, $post_type ) {
         
-		$setting = get_option( 'wpf_crm_post_fields', array() );
+		$setting = get_option( 'wpf_crm_' . $post_type . '_fields', array() );
         //BugFu::log($setting);
 
 			if ( ! empty( $setting ) ) {
 
-				$this->options['crm_post_fields'] = $setting;
+				$this->options['crm_' .$post_type . '_fields'] = $setting;
 
 			} elseif ( empty( $setting ) && empty( $this->options ) ) {
 
@@ -691,32 +709,32 @@ class WPF_Custom_Tab {
      * @return mixed
      */
     public function validate_field_custom_reset( $input, $setting ) {
-        BugFu::log($input);
+        //BugFu::log($input);
         if ( ! empty( $input ) ) {
             // Clean up wpf_options
             $wpf_options = get_option( 'wpf_options', array() );
-            BugFu::log($wpf_options);
+            //BugFu::log($wpf_options);
 
             // Remove our specific settings
             foreach ( $wpf_options as $key => $value ) {
                 // Remove post fields
                 if ( $key === 'post_fields' || $key === 'crm_post_fields' ) {
-                    BugFu::log("removing post_fields");
+                    //BugFu::log("removing post_fields");
                     unset( $wpf_options[$key] );
                 }
                 // Remove post type sync settings
                 if ( strpos( $key, 'post_type_sync_' ) === 0 ) {
-                    BugFu::log("removing post_type_sync_");
+                    //BugFu::log("removing post_type_sync_");
                     unset( $wpf_options[$key] );
                 }
                 // Remove post type sync settings
                 if ( strpos( $key, 'postType_' ) === 0 ) {
-                    BugFu::log("removing postType_");
+                    //BugFu::log("removing postType_");
                     unset( $wpf_options[$key] );
                 }
                 // Remove custom reset checkbox
                 if ( $key === 'custom_reset' ) {
-                    BugFu::log("removing custom_reset");
+                    //BugFu::log("removing custom_reset");
                     unset( $wpf_options[$key] );
                 }
             }
@@ -741,9 +759,9 @@ class WPF_Custom_Tab {
 	 * @return mixed
 	 */
 	public function validate_field_post_fields( $input, $setting, $options_class ) {
-        BugFu::log($input);
-        BugFu::log($setting);
-        BugFu::log($options_class);
+        //BugFu::log($input);
+        // BugFu::log($setting);
+        // BugFu::log($options_class);
 
 		// Unset the empty ones.
 		foreach ( $input as $field => $data ) {
@@ -778,10 +796,58 @@ class WPF_Custom_Tab {
 		}
 
 		unset( $input['new_field'] );
-        BugFu::log($input);
+        //BugFu::log($input);
 
 		$input = apply_filters( 'wpf_contact_fields_save', $input );
-        BugFu::log($input);
+        //BugFu::log($input);
+
+		return wpf_clean( $input );
+	}
+
+
+    public function validate_field_tribe_events_fields( $input, $setting, $options_class ) {
+       //BugFu::log("validate_field_tribe_events_fields");
+       //BugFu::log($input);
+        // BugFu::log($setting);
+        // BugFu::log($options_class);
+
+		// Unset the empty ones.
+		foreach ( $input as $field => $data ) {
+
+			if ( 'new_field' === $field ) {
+				continue;
+			}
+
+			if ( empty( $data['active'] ) && empty( $data['crm_field'] ) ) {
+				unset( $input[ $field ] );
+			}
+		}
+
+		// New fields.
+		if ( ! empty( $input['new_field']['key'] ) ) {
+
+			$input[ $input['new_field']['key'] ] = array(
+				'active'    => true,
+				'type'      => $input['new_field']['type'],
+				'crm_field' => $input['new_field']['crm_field'],
+			);
+
+			// Track which ones have been custom registered.
+
+			if ( ! isset( $options_class->options['custom_metafields'] ) ) {
+				$options_class->options['custom_metafields'] = array();
+			}
+
+			if ( ! in_array( $input['new_field']['key'], $options_class->options['custom_metafields'] ) ) {
+				$options_class->options['custom_metafields'][] = $input['new_field']['key'];
+			}
+		}
+
+		unset( $input['new_field'] );
+        //BugFu::log($input);
+
+		$input = apply_filters( 'wpf_contact_fields_save', $input );
+        //BugFu::log($input);
 
 		return wpf_clean( $input );
 	}
@@ -802,7 +868,9 @@ class WPF_Custom_Tab {
 	 */
 	public function post_updated( $post_id, $post_data, $old_post_data ) {
 
-		BugFu::log("post_updated init");
+		//BugFu::log("post_updated init");
+        //BugFu::log($post_data);
+  
 
 		 // Avoid infinite loops
 		//remove_action('post_updated', 'post_updated', 10, 3);
@@ -822,10 +890,16 @@ class WPF_Custom_Tab {
 			$post_data = array();
 		}
 
-		// $user_meta = $this->get_user_meta( $user_id );
+		$post_meta = $this->get_post_meta( $post_id );
+        $post_data = get_object_vars( $post_data );
+        //BugFu::log($post_meta);
+        //BugFu::log($post_data);
+        
 
-		// // Merge what's in the database with what was submitted on the form.
-		// $post_data = array_merge( $user_meta, $post_data );
+
+		// Merge what's in the database with what was submitted on the form.
+		$post_data = array_merge( $post_meta, $post_data );
+        //::log($post_data);
 
 		/**
 		 * Allow modification of the post data.
@@ -841,11 +915,11 @@ class WPF_Custom_Tab {
 		 */
 
 		$post_type= get_post_type($post_id);
-		BugFu::log($post_type);
+		//BugFu::log($post_type);
 
 		$post_data = apply_filters( 'wpf_post_updated', $post_data, $post_id );
-		$post_meta = get_post_meta($post_id);
-		BugFu::log($post_data->post_title);
+		//$post_meta = get_post_meta($post_id);
+		//BugFu::log($post_data->post_title);
 
 
 		// Allows for cancelling of registration via filter.
@@ -853,7 +927,9 @@ class WPF_Custom_Tab {
 			return false;
 		}
 
-		if ( empty( $post_data->post_title ) ) {
+        //BugFu::log($post_data['post_title']);
+
+        if ( empty( $post_data['post_title'] ) ) {
 
 			wpf_log(
 				'notice',
@@ -871,7 +947,7 @@ class WPF_Custom_Tab {
 
 		// Check if contact already exists in CRM.
 		$item_id = $this->get_item_id( $post_id, true );
-		BugFu::log($item_id);
+		//BugFu::log($item_id);
 
 		// if ( ! wpf_get_option( 'create_users' ) && false === $force && empty( $contact_id ) ) {
 
@@ -971,7 +1047,7 @@ class WPF_Custom_Tab {
 
 			// Send the update data.
 
-			$result = wp_fusion()->crm->update_object( $item_id, $post_data, 'post', $map_meta_fields = true );;
+			$result = wp_fusion()->crm->update_object( $item_id, $post_data, $post_type, $map_meta_fields = true );
 
 			if ( is_wp_error( $result ) ) {
 
@@ -1008,6 +1084,288 @@ class WPF_Custom_Tab {
 		// do_action( 'wpf_user_created', $user_id, $item_id, $post_data );
 
 		return $item_id;
+
+	}
+
+
+
+/**
+	 * Get all the available metadata from the database for a user
+	 *
+	 * @access public
+	 * @return array User Meta
+	 */
+	public function get_post_meta( $post_id = false ) {
+
+		if ( false === $post_id ) {
+			return array();
+		}
+
+		if ( empty( $post_id ) ) {
+			return apply_filters( 'wpf_get_user_meta', array(), $post_id );
+		}
+
+		// Start by getting everything in the database.
+
+		$post_meta = get_post_meta( $post_id );
+
+		if ( ! $post_meta ) {
+			return apply_filters( 'wpf_get_user_meta', array(), $post_id );
+		}
+
+		$post_meta = array_map(
+			function ( $a ) {
+				return maybe_unserialize( $a[0] );
+			},
+			$post_meta
+		);
+
+		// // get_userdata() doesn't work properly during an auto login session.
+
+		// if ( doing_wpf_auto_login() && wpf_get_current_user_id() === $user_id ) {
+		// 	return apply_filters( 'wpf_get_user_meta', $user_meta, $user_id );
+		// }
+
+		// $userdata = get_userdata( $user_id );
+
+		// if ( false === $userdata ) {
+		// 	return array();
+		// }
+
+		// $user_meta['user_id']         = $user_id;
+		// $user_meta['user_login']      = $userdata->user_login;
+		// $user_meta['user_email']      = $userdata->user_email;
+		// $user_meta['user_registered'] = $userdata->user_registered;
+		// $user_meta['user_nicename']   = $userdata->user_nicename;
+		// $user_meta['user_url']        = $userdata->user_url;
+		// $user_meta['display_name']    = $userdata->display_name;
+
+		// if ( is_array( $userdata->roles ) ) {
+		// 	$user_meta['role'] = reset( $userdata->roles );
+		// }
+
+		// if ( ! empty( $userdata->caps ) ) {
+		// 	$user_meta[ $userdata->cap_key ] = array_keys( $userdata->caps );
+		// }
+
+		// $user_meta['ip'] = $this->get_ip();
+
+		// $user_meta = apply_filters( 'wpf_get_user_meta', $user_meta, $user_id );
+
+		return $post_meta;
+	}
+
+
+
+
+    public function tribe_events_updated( $post_id, $post_data, $old_post_data ) {
+
+		//BugFu::log("tribe_events_updated init");
+
+		//  // Avoid infinite loops
+		// //remove_action('post_updated', 'post_updated', 10, 3);
+
+		// // Check if this is a new post (creation)
+		// if (wp_is_post_revision($post_id) || $post_data->post_status == 'auto-draft') {
+		// 	add_action('post_updated', 'post_updated', 10, 3);
+		// 	return;
+		// }
+
+		// do_action( 'wpf_post_updated_start', $post_id, $post_data );
+
+		// // Get posted data from the registration form.
+		// if ( empty( $post_data ) && ! empty( $_POST ) && is_array( $_POST ) ) {
+		// 	$post_data = (array) wpf_clean( wp_unslash( $_POST ) );
+		// } elseif ( empty( $post_data ) ) {
+		// 	$post_data = array();
+		// }
+
+		// // $user_meta = $this->get_user_meta( $user_id );
+
+		// // // Merge what's in the database with what was submitted on the form.
+		// // $post_data = array_merge( $user_meta, $post_data );
+
+		// /**
+		//  * Allow modification of the post data.
+		//  *
+		//  * @since 1.0.0
+		//  *
+		//  * @see   WPF_User::maybe_set_first_last_name()
+		//  * @see   WPF_User_Profile::filter_form_fields()
+		//  * @link  https://wpfusion.com/documentation/filters/wpf_user_register/
+		//  *
+		//  * @param array|null $post_data The registration data.
+		//  * @param int        $user_id   The user ID.
+		//  */
+
+		// $post_type= get_post_type($post_id);
+		// BugFu::log($post_type);
+
+		// $post_data = apply_filters( 'wpf_post_updated', $post_data, $post_id );
+		// $post_meta = get_post_meta($post_id);
+		// BugFu::log($post_data->post_title);
+
+
+		// // Allows for cancelling of registration via filter.
+		// if ( null === $post_data ) {
+		// 	return false;
+		// }
+
+		// if ( empty( $post_data->post_title ) ) {
+
+		// 	wpf_log(
+		// 		'notice',
+		// 		$post_id,
+		// 		/* translators: %s: CRM Name */
+		// 		sprintf( __( 'Post not synced to %s because Post Title wasn\'t detected in the submitted data.', 'wp-fusion-lite' ), wp_fusion()->crm->name ),
+		// 		array(
+		// 			'source'              => 'user-register',
+		// 			//'meta_array_nofilter' => $post_meta,
+		// 		)
+		// 	);
+
+		// 	return false;
+		// }
+
+		// // Check if contact already exists in CRM.
+		// $item_id = $this->get_item_id( $post_id, true );
+		// BugFu::log($item_id);
+
+		// // if ( ! wpf_get_option( 'create_users' ) && false === $force && empty( $contact_id ) ) {
+
+		// // 	wpf_log(
+		// // 		'notice',
+		// // 		$user_id,
+		// // 		/* translators: %s: CRM Name */
+		// // 		sprintf( __( 'User registration not synced to %s because "Create Contacts" is disabled in the WP Fusion settings. You will not be able to apply tags to this user.', 'wp-fusion-lite' ), wp_fusion()->crm->name )
+		// // 	);
+
+		// // 	return false;
+
+		// // }
+
+		// // // Get any lists to add.
+		// // $assign_lists = wpf_get_option( 'assign_lists' );
+
+		// // if ( ! empty( $assign_lists ) ) {
+		// // 	$post_data['lists'] = $assign_lists;
+		// // }
+
+		// if ( empty( $item_id ) ) {
+
+		// 	// Contact does not exist in the CRM.
+
+		// 	// See if user role is elligible for being created as a contact.
+
+		// 	// $valid_roles = wpf_get_option( 'user_roles', array() );
+
+		// 	// $valid_roles = apply_filters( 'wpf_register_valid_roles', $valid_roles, $user_id, $post_data );
+
+		// 	// if ( ! empty( $valid_roles ) && ! in_array( $post_data['role'], $valid_roles ) && false === $force ) {
+
+		// 	// 	wpf_log(
+		// 	// 		'notice',
+		// 	// 		$user_id,
+		// 	// 		/* translators: %1$s: CRM Name, %2$s New user's role slug */
+		// 	// 		sprintf( __( 'User not added to %1$s because role %2$s isn\'t enabled for contact creation.', 'wp-fusion-lite' ), wp_fusion()->crm->name, '<strong>' . $post_data['role'] . '</strong>' )
+		// 	// 	);
+		// 	// 	return false;
+
+		// 	// }
+
+		// 	// Log what's about to happen.
+
+		// 	wpf_log(
+		// 		'info',
+		// 		$post_id,
+		// 		/* translators: %s: CRM Name */
+		// 		sprintf( __( 'New post registration. Adding item to %s:', 'wp-fusion-lite' ), wp_fusion()->crm->name ),
+		// 		array(
+		// 			'source'     => 'post-update',
+		// 			// 'meta_array' => $post_meta,
+		// 		)
+		// 	);
+
+		// 	// Add the item to the CRM.
+
+		// 	$item_id = wp_fusion()->crm->add_object( $post_data, $post_type, $map_meta_fields = true );
+
+		// 	if ( is_wp_error( $item_id ) ) {
+
+		// 		// Error logging.
+
+		// 		wpf_log(
+		// 			$item_id->get_error_code(),
+		// 			$post_id,
+		// 			/* translators: %s: Error message */
+		// 			sprintf( __( 'Error adding item: %s', 'wp-fusion-lite' ), $item_id->get_error_message() ),
+		// 			array(
+		// 				'source' => 'post-update',
+		// 			)
+		// 		);
+
+		// 		return false;
+
+		// 	}
+
+		// 	$item_id = sanitize_text_field( $item_id );
+
+		// 	update_post_meta( $post_id, WPF_ITEM_ID_META_KEY, $item_id );
+
+		// } else {
+
+		// 	// Contact already exists in the CRM, update them.
+
+		// 	wpf_log(
+		// 		'info',
+		// 		$post_id,
+		// 		/* translators: %1$s: Existing contact ID, %2$s CRM name */
+		// 		sprintf( __( 'New post registration. Updating item #%1$s in %2$s:', 'wp-fusion-lite' ), $item_id, wp_fusion()->crm->name ),
+		// 		array(
+		// 			'source'     => 'post-update',
+		// 			// 'meta_array' => $post_data,
+		// 		)
+		// 	);
+
+		// 	// Send the update data.
+
+		// 	$result = wp_fusion()->crm->update_object( $item_id, $post_data, 'post', $map_meta_fields = true );;
+
+		// 	if ( is_wp_error( $result ) ) {
+
+		// 		// If update failed.
+
+		// 		wpf_log(
+		// 			$result->get_error_code(),
+		// 			$post_id,
+		// 			/* translators: %s: Error message */
+		// 			sprintf( __( 'Error updating item: %s', 'wp-fusion-lite' ), $result->get_error_message() ),
+		// 			array(
+		// 				'source' => 'post-update',
+		// 			)
+		// 		);
+
+		// 		return false;
+
+		// 	}
+
+		// 	// Load the tags from the existing contact record.
+
+		// 	// $this->get_tags( $user_id, true, false );
+
+		// }
+
+		// // Assign any tags specified in the WPF settings page.
+		// // $assign_tags = wpf_get_option( 'assign_tags' );
+
+		// // if ( ! empty( $assign_tags ) ) {
+		// // 	wp_fusion()->logger->add_source( 'general-settings' );
+		// // 	$this->apply_tags( $assign_tags, $user_id );
+		// // }
+
+		// // do_action( 'wpf_user_created', $user_id, $item_id, $post_data );
+
+		// return $item_id;
 
 	}
 
@@ -1107,13 +1465,11 @@ class WPF_Custom_Tab {
     // $update_data will always be empty here
 
     public function wpf_cpt_map_meta_fields( $update_data, $post_meta ) {
-        BugFu::log("wpf_cpt_map_meta_fields");
-        BugFu::log($update_data);
-        BugFu::log($post_meta);
+      
         $post_type = get_post_type($post_meta['ID']);
-        BugFu::log($post_type);
+      
         $update_data = $this->map_cpt_meta_fields($post_meta, $post_type);
-        BugFu::log($update_data);
+       
         return $update_data;
     }
 
@@ -1125,8 +1481,9 @@ class WPF_Custom_Tab {
 	 */
 
 	 public function map_cpt_meta_fields( $user_meta, $post_type ) {
-		BugFu::log("map_cpt_meta_fields init");
-		BugFu::log($post_type);
+        //BugFu::log("map_cpt_meta_fields");
+        //BugFu::log($user_meta);
+		
 
 		if ( ! is_array( $user_meta ) || empty( $user_meta ) ) {
 			return array();

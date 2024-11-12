@@ -5,8 +5,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 function get_post_meta_keys( $post_type ) {
-    // BugFu::log("get_post_meta_keys init");
-    // BugFu::log($post_type);
+
 
     global $wpdb;
 
@@ -32,7 +31,7 @@ function get_post_meta_keys( $post_type ) {
     // Merge standard fields with meta keys
     $meta_keys = array_merge($standard_fields, $meta_keys);
 
-    // BugFu::log($meta_keys);
+    //BugFu::log($meta_keys);
     
     return $meta_keys;
 }
@@ -103,7 +102,7 @@ function format_post_meta_keys( $post_type ) {
 
 
 function wpf_render_post_field_select( $setting, $meta_name, $field_id = false, $field_sub_id = false ) {
-	// BugFu::log("wpf_render_crm_field_select init");
+	//BugFu::log("wpf_render_crm_field_select init");
 	//BugFu::log($setting);
 
 	if ( doing_action( 'show_field_crm_field' ) ) {

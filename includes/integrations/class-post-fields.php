@@ -37,8 +37,7 @@ class WPF_Post_Fields {
      */
     public static function show_field_post_fields($id, $field, $post_type) {
  
-        BugFu::log($id);
-        //BugFu::log($field);
+   
 
         // Lets group post fields by integration if we can
         $field_groups = array(
@@ -71,9 +70,10 @@ class WPF_Post_Fields {
          *
          * @param array $fields    Tags to be removed from the user
          */
-        $field['choices'] = apply_filters( 'wpf_post_meta_fields', $field['choices'] );
+        $field['choices'] = apply_filters( 'wpf_post_meta_fields', $field['choices'], $post_type );
 
-        foreach ( wp_fusion()->settings->get( 'post_fields', array() ) as $key => $data ) {
+
+        foreach ( wp_fusion()->settings->get( $post_type.'_fields', array() ) as $key => $data ) {
             if ( ! isset( $field['choices'][ $key ] ) ) {
                 $field['choices'][ $key ] = $data;
             }
@@ -127,10 +127,10 @@ class WPF_Post_Fields {
         wp_fusion()->settings->options = apply_filters( 'wpf_initialize_options_post_fields', wp_fusion()->settings->options );
 
         // These fields should be turned on by default
-        if ( empty( wp_fusion()->settings->options['post_fields']['post_title']['active'] ) ) {
+        if ( empty( wp_fusion()->settings->options[$post_type . '_fields']['post_title']['active'] ) ) {
             //BugFu::log(wp_fusion()->settings->options['post_fields']);
-            wp_fusion()->settings->options['post_fields']['post_title']['active'] = true;
-            wp_fusion()->settings->options['post_fields']['ID']['active'] = true;
+            wp_fusion()->settings->options[$post_type . '_fields']['post_title']['active'] = true;
+            wp_fusion()->settings->options[$post_type . '_fields']['ID']['active'] = true;
         }
 
         $field_types = array( 'text', 'date', 'multiselect', 'checkbox', 'state', 'country', 'int', 'raw', 'tel' );
@@ -215,7 +215,7 @@ class WPF_Post_Fields {
                 }
 
                 echo '<tr' . ( wp_fusion()->settings->options[ $id ][ $post_meta ]['active'] == true ? ' class="success" ' : '' ) . '>';
-                echo '<td><input class="checkbox post-fields-checkbox"' . ( empty( wp_fusion()->settings->options[ $id ][ $post_meta ]['crm_field'] ) ? ' disabled' : '' ) . ' type="checkbox" id="wpf_cb_' . esc_attr( $post_meta ) . '" name="wpf_options[' . esc_attr( $id ) . '][' . esc_attr( $post_meta ) . '][active]" value="1" ' . checked( wp_fusion()->settings->options[ $id ][ $post_meta ]['active'], 1, false ) . '/></td>';
+                echo '<td><input class="checkbox contact-fields-checkbox"' . ( empty( wp_fusion()->settings->options[ $id ][ $post_meta ]['crm_field'] ) ? ' disabled' : '' ) . ' type="checkbox" id="wpf_cb_' . esc_attr( $post_meta ) . '" name="wpf_options[' . esc_attr( $id ) . '][' . esc_attr( $post_meta ) . '][active]" value="1" ' . checked( wp_fusion()->settings->options[ $id ][ $post_meta ]['active'], 1, false ) . '/></td>';
                 echo '<td class="wp_field_label">' . ( isset( $data['label'] ) ? esc_html( wp_strip_all_tags( $data['label'] ) ) : '' );
 
                 // Tooltips
@@ -303,8 +303,10 @@ class WPF_Post_Fields {
      */
     public static function wpf_render_post_field_select( $setting, $meta_name, $field_id = false, $field_sub_id = false ) {
         // BugFu::log("wpf_render_crm_field_select init");
-        //BugFu::log($setting);
-        //BugFu::log($field_sub_id);
+        // BugFu::log($setting);
+        // BugFu::log($meta_name);
+        // BugFu::log($field_id);
+        // BugFu::log($field_sub_id);
     
         if ( doing_action( 'show_field_crm_field' ) ) {
             // Settings page.
@@ -330,7 +332,7 @@ class WPF_Post_Fields {
     
         echo '<option></option>';
     
-        $crm_fields = wpf_get_option( 'crm_post_fields' );
+        $crm_fields = wpf_get_option( 'crm_' . $field_id );
     
         if ( ! empty( $crm_fields ) ) {
     
