@@ -119,6 +119,9 @@ class WPF_Custom_Tab {
 
         // hook into map_meta_fields, which is usually just for user meta mapping, and override the $update_data for custom post types
         add_filter( 'wpf_map_meta_fields', array( $this, 'wpf_cpt_map_meta_fields' ), 10, 2 );
+
+        // Add filter for handling timeline fields
+        add_filter('wpf_monday_sync_post_type_fields', array($this, 'handle_timeline_fields'), 10, 3);
     }
     
 
@@ -519,41 +522,24 @@ class WPF_Custom_Tab {
 	}
 
     public function sync_post_type_fields($post_type) {
-
-        //BugFu::log($post_type);
-
-		// Load built in fields first
-		// require dirname( __FILE__ ) . '/monday-fields.php';
-
-		$built_in_fields = array();
-
-		// foreach ( $monday_fields as $index => $data ) {
-		// 	$built_in_fields[ $data['crm_field'] ] = $data['crm_label'];
-		// }
-
-		// asort( $built_in_fields );
-        // Fetch the API key
-
         $api_key = wpf_get_option('monday_key');
         if (empty($api_key)) {
             return new WP_Error('no_api_key', __('No API key provided.', 'wp-fusion'));
         }
 
-		$options = get_option('wpf_options');
+        $options = get_option('wpf_options');
 
-		// Check if the post_type_sync_ key exists and its value
-		if (isset($options['post_type_sync_' . $post_type])) {
-			$board = $options['post_type_sync_' . $post_type];
-		}
-
-		//BugFu::log("selected board: " . $board);
+        // Check if the post_type_sync_ key exists and its value
+        if (isset($options['post_type_sync_' . $post_type])) {
+            $board = $options['post_type_sync_' . $post_type];
+        }
 
         if (empty($board)) {
             return new WP_Error('no_board_selected', __('No board selected for this post type.', 'wp-fusion'));
         }
 
-        // Prepare the GraphQL query
-        $query = '{"query": "{ boards (ids: [' . $board . ']) { columns { id title } } }"}';
+        // Modified GraphQL query to include column type
+        $query = '{"query": "{ boards (ids: [' . $board . ']) { columns { id title type } } }"}';
 
         // Make the request
         $response = wp_safe_remote_post(
@@ -567,7 +553,6 @@ class WPF_Custom_Tab {
                 'body'    => $query,
             )
         );
-       
 
         // Handle the response
         if (is_wp_error($response)) {
@@ -575,7 +560,6 @@ class WPF_Custom_Tab {
         }
 
         $body = json_decode(wp_remote_retrieve_body($response), true);
-		//BugFu::log($body);
 
         // Check for errors in the response
         if (isset($body['errors']) && !empty($body['errors'])) {
@@ -587,28 +571,93 @@ class WPF_Custom_Tab {
             return new WP_Error('no_columns_found', __('No columns found for the selected board.', 'wp-fusion'));
         }
 
-		
-
         // Process the columns
+        $built_in_fields = array();
         $custom_fields = array();
-		
 
         foreach ($body['data']['boards'][0]['columns'] as $column) {
             $custom_fields[$column['id']] = $column['title'];
         }
-		//BugFu::log($custom_fields);
 
-		$post_fields = array(
-			'Standard Fields' => $built_in_fields,
-			'Custom Fields'   => $custom_fields,
-		);
-		
-		// 'wpf_set_setting_' . $key fired
+        $post_fields = array(
+            'Standard Fields' => $built_in_fields,
+            'Custom Fields'   => $custom_fields,
+        );
+
+        // Allow filtering of post type fields
+        $post_fields = apply_filters('wpf_monday_sync_post_type_fields', $post_fields, $body['data']['boards'][0]['columns'], $post_type);
 
         wp_fusion()->settings->set('crm_'.$post_type.'_fields', $post_fields);
 
         return true;
     }
+
+
+    /**
+     * Handles timeline fields by splitting them into from/to date fields
+     *
+     * @access public
+     * @param array $post_fields The post fields
+     * @param array $columns The columns from Monday.com
+     * @param string $post_type The post type
+     * @return array Modified post fields
+     */
+    public function handle_timeline_fields($post_fields, $columns, $post_type) {
+        BugFu::log("handle_timeline_fields init");
+        BugFu::log($post_fields);
+        BugFu::log($columns);
+
+        $timeline_fields = array();
+
+        // Loop through columns to find timeline fields
+        foreach ($columns as $column) {
+            if ($column['type'] === 'timeline') {
+                // Remove the original timeline field if it exists
+                if (isset($post_fields['Custom Fields'][$column['id']])) {
+                    unset($post_fields['Custom Fields'][$column['id']]);
+                }
+
+                // Add from field
+                $timeline_fields[$column['id'] . '_from'] = $column['title'] . ' (From)';
+                
+                // Add to field
+                $timeline_fields[$column['id'] . '_to'] = $column['title'] . ' (To)';
+                
+            }
+        }
+        BugFu::log($post_fields);
+        BugFu::log($timeline_fields);
+
+        // If we found any timeline fields, add them to the custom fields array
+        if (!empty($timeline_fields)) {
+            if (!isset($post_fields['Custom Fields'])) {
+                $post_fields['Custom Fields'] = array();
+            }
+            
+            
+            // Merge the timeline fields with existing custom fields
+            $post_fields['Custom Fields'] = array_merge($post_fields['Custom Fields'], $timeline_fields);
+            BugFu::log($post_fields['Custom Fields']);
+            
+            
+            // Re-sort the custom fields alphabetically by title
+            $test = uasort($post_fields['Custom Fields'], function($a, $b) {
+                // Get the title/label for comparison
+                $title_a = is_array($a) ? $a['title'] : $a;
+                $title_b = is_array($b) ? $b['title'] : $b;
+                
+                return strcmp($title_a, $title_b);
+            });
+            BugFu::log($test);
+        }
+
+        BugFu::log("Modified post fields:");
+        BugFu::log($post_fields);
+
+        return $post_fields;
+    }
+
+
 
     /**
      * Save post type fields to custom option
@@ -1583,4 +1632,6 @@ class WPF_Custom_Tab {
 	}
 
     
-} 
+
+    
+}   
