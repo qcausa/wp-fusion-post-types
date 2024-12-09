@@ -237,8 +237,8 @@ class WPF_Post_Fields {
                 }
 
                 // Allow overriding types via dropdown
-                if ( ! empty( wp_fusion()->settings->options['post_fields'][ $post_meta ]['type'] ) ) {
-                    $data['type'] = wp_fusion()->settings->options['post_fields'][ $post_meta ]['type'];
+                if ( ! empty( wp_fusion()->settings->options[$post_type .'_fields'][ $post_meta ]['type'] ) ) {
+                    $data['type'] = wp_fusion()->settings->options[$post_type .'_fields'][ $post_meta ]['type'];
                 }
 
                 if ( ! in_array( $data['type'], $field_types ) ) {

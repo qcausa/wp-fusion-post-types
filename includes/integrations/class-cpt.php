@@ -114,7 +114,7 @@ class WPF_Custom_Tab {
 
 
         // Post type actions
-		add_action( 'post_updated', array( $this, 'post_updated' ), 10, 3 );
+		add_action( 'save_post', array( $this, 'post_updated' ), 100, 3 );
         add_action( 'tribe_events_updated', array( $this, 'tribe_events_updated' ), 10, 3 );
 
         // hook into map_meta_fields, which is usually just for user meta mapping, and override the $update_data for custom post types
@@ -603,59 +603,51 @@ class WPF_Custom_Tab {
      * @return array Modified post fields
      */
     public function handle_timeline_fields($post_fields, $columns, $post_type) {
-        BugFu::log("handle_timeline_fields init");
-        BugFu::log($post_fields);
-        BugFu::log($columns);
-
-        $timeline_fields = array();
-
-        // Loop through columns to find timeline fields
-        foreach ($columns as $column) {
-            if ($column['type'] === 'timeline') {
-                // Remove the original timeline field if it exists
-                if (isset($post_fields['Custom Fields'][$column['id']])) {
-                    unset($post_fields['Custom Fields'][$column['id']]);
-                }
-
-                // Add from field
-                $timeline_fields[$column['id'] . '_from'] = $column['title'] . ' (From)';
-                
-                // Add to field
-                $timeline_fields[$column['id'] . '_to'] = $column['title'] . ' (To)';
-                
-            }
-        }
-        BugFu::log($post_fields);
-        BugFu::log($timeline_fields);
-
-        // If we found any timeline fields, add them to the custom fields array
-        if (!empty($timeline_fields)) {
-            if (!isset($post_fields['Custom Fields'])) {
-                $post_fields['Custom Fields'] = array();
-            }
-            
-            
-            // Merge the timeline fields with existing custom fields
-            $post_fields['Custom Fields'] = array_merge($post_fields['Custom Fields'], $timeline_fields);
-            BugFu::log($post_fields['Custom Fields']);
-            
-            
-            // Re-sort the custom fields alphabetically by title
-            $test = uasort($post_fields['Custom Fields'], function($a, $b) {
-                // Get the title/label for comparison
-                $title_a = is_array($a) ? $a['title'] : $a;
-                $title_b = is_array($b) ? $b['title'] : $b;
-                
-                return strcmp($title_a, $title_b);
-            });
-            BugFu::log($test);
-        }
-
-        BugFu::log("Modified post fields:");
-        BugFu::log($post_fields);
-
-        return $post_fields;
-    }
+		BugFu::log("handle_timeline_fields init");
+	
+		$timeline_fields = array();
+	
+		// Loop through columns to find timeline fields
+		foreach ($columns as $column) {
+			if ($column['type'] === 'timeline') {
+				$timeline_fields[$column['id']] = array(
+					'title' => $column['title'],
+					'from'  => $column['id'] . '_from',
+					'to'    => $column['id'] . '_to',
+				);
+	
+				// Remove the original timeline field
+				if (isset($post_fields['Custom Fields'][$column['id']])) {
+					unset($post_fields['Custom Fields'][$column['id']]);
+				}
+	
+				// Add new split fields
+				$post_fields['Custom Fields'][$column['id'] . '_from'] = $column['title'] . ' (From)';
+				$post_fields['Custom Fields'][$column['id'] . '_to'] = $column['title'] . ' (To)';
+			}
+		}
+	
+		// Store timeline fields metadata for later use
+		if (!empty($timeline_fields)) {
+			BugFu::log("Storing timeline fields metadata");
+			BugFu::log($timeline_fields);
+			update_option('wpf_monday_timeline_fields', $timeline_fields, false);
+	
+			// Re-sort the custom fields alphabetically by title
+			uasort($post_fields['Custom Fields'], function($a, $b) {
+				// Get the title/label for comparison
+				$title_a = is_array($a) ? $a['title'] : $a;
+				$title_b = is_array($b) ? $b['title'] : $b;
+				return strcmp($title_a, $title_b);
+			});
+		}
+	
+		BugFu::log("Modified post fields:");
+		BugFu::log($post_fields);
+	
+		return $post_fields;
+	}
+	
 
 
 
@@ -918,7 +910,7 @@ class WPF_Custom_Tab {
 	public function post_updated( $post_id, $post_data, $old_post_data ) {
 
 		//BugFu::log("post_updated init");
-        //BugFu::log($post_data);
+        BugFu::log($post_data);
   
 
 		 // Avoid infinite loops
@@ -940,6 +932,7 @@ class WPF_Custom_Tab {
 		}
 
 		$post_meta = $this->get_post_meta( $post_id );
+		BugFu::log($post_meta);
         $post_data = get_object_vars( $post_data );
         //BugFu::log($post_meta);
         //BugFu::log($post_data);
@@ -1530,7 +1523,7 @@ class WPF_Custom_Tab {
 	 */
 
 	 public function map_cpt_meta_fields( $user_meta, $post_type ) {
-        //BugFu::log("map_cpt_meta_fields");
+        BugFu::log("map_cpt_meta_fields");
         //BugFu::log($user_meta);
 		
 
@@ -1624,7 +1617,7 @@ class WPF_Custom_Tab {
 			}
 		}
 
-		$update_data = apply_filters( 'wpf_map_post_meta_fields', $update_data, $user_meta );
+		$update_data = apply_filters( 'wpf_map_cpt_meta_fields', $update_data, $user_meta );
         
 
 		return $update_data;
